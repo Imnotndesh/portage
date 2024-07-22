@@ -91,5 +91,7 @@ func StartReceiveServer() {
 		fmt.Println("----------File transfer----------")
 		go handleConnection(conn, &wg)
 		wg.Wait()
+		fmt.Println("--------------Done*--------------")
+		fmt.Println("")
 	}
 }
