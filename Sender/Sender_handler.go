@@ -1,39 +1,76 @@
 package Sender
 
 import (
-	"errors"
+	"fmt"
 	"io"
 	"log"
 	"net"
 	"os"
 )
 
-func SendFileToIP(filepath string, receiverIP string) error {
-	var err error
-	file, err := os.Open(filepath)
-	if err != nil {
-		return errors.New("Error opening file: " + err.Error())
-	}
+const (
+	machinename = "testsender"
+	network     = "tcp"
+)
+
+func sendFile(conn net.Conn, filename string) {
+	defer conn.Close()
+	fileBuffer := make([]byte, 1024)
+	file, err := os.Open(filename)
 	defer file.Close()
-	connection, err := net.Dial("tcp", receiverIP)
 	if err != nil {
-		return errors.New("Error establishing a connection ")
+		log.Fatal(err)
 	}
-	defer connection.Close()
-	buffer := make([]byte, 1024)
 	for {
-		n, err := file.Read(buffer)
+		chunks, err := file.Read(fileBuffer)
 		if err == io.EOF {
 			break
 		}
 		if err != nil {
-			log.Println("Error reading file: " + err.Error())
-			os.Exit(1)
+			log.Fatal(err)
 		}
-		_, err = connection.Write(buffer[:n])
+		_, err = conn.Write(fileBuffer[:chunks])
 		if err != nil {
-			return err
+			log.Fatal(err)
+			return
 		}
 	}
-	return nil
+	fmt.Println("Sent successfully to remote")
+}
+func responseListener(conn net.Conn) (string, net.Conn) {
+	buffer := make([]byte, 1024)
+	n, err := conn.Read(buffer)
+	if err != nil {
+		log.Println(err.Error())
+	}
+	return string(buffer[:n]), conn
+}
+
+var requestMessage []byte
+
+func SendToRemoteMachine(filename string, remoteIP string) {
+	receiverIP := remoteIP + ":9080"
+	conn, err := net.Dial(network, receiverIP)
+	if err != nil {
+		log.Println(err)
+	}
+	defer conn.Close()
+	reqString := filename + ":" + machinename
+	requestMessage = []byte(reqString)
+	_, err = conn.Write(requestMessage)
+	if err != nil {
+		log.Fatal(err.Error())
+	}
+	responseText, establishedConn := responseListener(conn)
+	switch responseText {
+	case "Y":
+		sendFile(establishedConn, filename)
+		os.Exit(0)
+	case "N":
+		fmt.Println("Transfer request denied")
+		os.Exit(0)
+	default:
+		fmt.Println("Invalid response: Switching to default (Stop transfer)")
+		os.Exit(0)
+	}
 }
