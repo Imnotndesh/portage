@@ -1,0 +1,46 @@
+name: Automated Release
+
+on:
+  push:
+    tags:
+      - v*
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+
+      - name: Set up Go
+        uses: actions/setup-go@v1
+        with:
+          go-version: 1.22
+
+      - name: Build portage
+        run: go build -o portage ./main.go
+
+      - name: Upload Release Asset
+        uses: actions/upload-artifact@v2
+        with:
+          name: portage-executable
+          path: portage
+
+      - name: Create Release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GIT_TOKEN }}
+        with:
+          tag_name: ${{ github.ref }}
+          release_name: Portage Release ${{ github.ref }}
+          body: |
+            Portage version: ${{ github.ref }}.
+
+          draft: true
+          prerelease: true
+
+      - name: Upload Asset
+        uses: actions/upload-asset@v2
+        with:
+          upload_url: ${{ github.releases.upload_url }}
+          asset_name: portage
+          path: ./portage-executable/portage
