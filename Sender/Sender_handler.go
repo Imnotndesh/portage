@@ -14,10 +14,22 @@ const (
 )
 
 func sendFile(conn net.Conn, filename string) {
-	defer conn.Close()
+	defer func(conn net.Conn) {
+		err := conn.Close()
+		if err != nil {
+			recover()
+			log.Fatal(err)
+		}
+	}(conn)
 	fileBuffer := make([]byte, 1024)
 	file, err := os.Open(filename)
-	defer file.Close()
+	defer func(file *os.File) {
+		err := file.Close()
+		if err != nil {
+			recover()
+			log.Fatal(err)
+		}
+	}(file)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -48,29 +60,31 @@ func responseListener(conn net.Conn) (string, net.Conn) {
 
 var requestMessage []byte
 
-func SendToRemoteMachine(filename string, remoteIP string) {
-	receiverIP := remoteIP + ":9080"
-	conn, err := net.Dial(network, receiverIP)
-	if err != nil {
-		log.Println(err)
-	}
-	defer conn.Close()
-	reqString := filename + ":" + machinename
-	requestMessage = []byte(reqString)
-	_, err = conn.Write(requestMessage)
-	if err != nil {
-		log.Fatal(err.Error())
-	}
-	responseText, establishedConn := responseListener(conn)
-	switch responseText {
-	case "Y":
-		sendFile(establishedConn, filename)
-		os.Exit(0)
-	case "N":
-		fmt.Println("Transfer request denied")
-		os.Exit(0)
-	default:
-		fmt.Println("Invalid response: Switching to default (Stop transfer)")
-		os.Exit(0)
+func SendToRemoteMachine(receiveIP string, files ...string) {
+	receiverIP := receiveIP + ":9080"
+	for _, filename := range files {
+		conn, err := net.Dial(network, receiverIP)
+		if err != nil {
+			log.Println(err)
+		}
+		reqString := filename + ":" + machinename
+		requestMessage = []byte(reqString)
+		_, err = conn.Write(requestMessage)
+		if err != nil {
+			log.Fatal(err.Error())
+		}
+		responseText, establishedConn := responseListener(conn)
+		switch responseText {
+		case "Y":
+			sendFile(establishedConn, filename)
+			continue
+		case "N":
+			fmt.Println("Transfer request denied")
+			continue
+		default:
+			fmt.Println("Invalid response: Switching to default (Stop transfer)")
+			continue
+		}
+		conn.Close()
 	}
 }

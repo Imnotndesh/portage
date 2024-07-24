@@ -12,9 +12,9 @@ func main() {
 	var modes = strings.ToUpper(os.Args[1])
 	switch modes {
 	case "-S":
-		var file = os.Args[2]
-		var receiverIP = os.Args[3]
-		Sender.SendToRemoteMachine(file, receiverIP)
+		var receiverIP = os.Args[2]
+		files := os.Args[3:]
+		Sender.SendToRemoteMachine(receiverIP, files...)
 	case "-R":
 		Receiver.StartReceiveServer()
 	default:
