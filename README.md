@@ -1,3 +1,4 @@
+[![Check if it builds](https://github.com/Imnotndesh/portage/actions/workflows/portage.yml/badge.svg)](https://github.com/Imnotndesh/portage/actions/workflows/portage.yml)
 # Portage
 A simple file sending utility written in golang
 
