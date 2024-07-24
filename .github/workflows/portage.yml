@@ -1,4 +1,4 @@
-name: Build and Release Portage
+name: Check if it builds
 
 on:
   push:
@@ -9,29 +9,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
-      - name: Install Go (replace with your specific version if needed)
+      - name: Install Go
         uses: actions/setup-go@v2
         with:
           go-version: '1.22'
       - name: Build portage
-        run: go build -o portage main.go  # Replace with your build command and output path
-      - uses: actions/upload-artifact@v2
-        with:
-          name: go-app-artifact
-          path: ./portage  # Replace with your output binary path
-
-  release:
-    needs: build
-    runs-on: ubuntu-latest
-    steps:
-      - uses: git@v4
-        name: Get commit message
-      - id: get_message
-        run: |
-          git log --pretty=%B -1
-      - uses: softprops/action-gh-release@v1
-        with:
-          tag_name: ${{ github.ref }}
-          name: New Release ${{ github.ref }}
-          body: ${{ steps.get_message.outputs }}
-          files: ./portage@${{ github.run_id }} 
+        run: go build -o portage main.go
