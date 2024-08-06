@@ -11,14 +11,14 @@ import (
 )
 
 const (
-	machinename = "testreceiver"
-	port        = ":9080"
-	network     = "tcp"
+	port    = "9080"
+	network = "tcp"
+	address = "127.0.0.1"
 )
 
-func ExtractDataFromMessage(message string) (string, string) {
+func ExtractDataFromMessage(message string) (string, string, string) {
 	tmpMsg := strings.Split(message, ":")
-	return tmpMsg[0], tmpMsg[1]
+	return tmpMsg[0], tmpMsg[1], tmpMsg[2]
 }
 func receiveFile(conn net.Conn, filename string) {
 	defer conn.Close()
@@ -34,14 +34,13 @@ func receiveFile(conn net.Conn, filename string) {
 			break
 		}
 		if err != nil {
-			log.Panic("Cannot read from connection")
+			log.Println("Cannot read from connection")
 		}
 		outfile.Write(buffer[:fileChunks])
 	}
 	fmt.Println("Received file successfully")
 }
 func handleConnection(conn net.Conn, wg *sync.WaitGroup) {
-	defer conn.Close()
 	var response []byte
 	var responseStr string
 	buffer := make([]byte, 1024)
@@ -51,8 +50,8 @@ func handleConnection(conn net.Conn, wg *sync.WaitGroup) {
 		return
 	}
 	requestMsg := string(buffer[:senderMsg])
-	newFilename, senderAlias := ExtractDataFromMessage(requestMsg)
-	fmt.Println("Do you want to receive file : " + newFilename + ", From: " + senderAlias + " : (Y/N)")
+	newFilename, newFileSize, senderAlias := ExtractDataFromMessage(requestMsg)
+	fmt.Println("Do you want to receive file : " + newFilename + " , size: " + newFileSize + ", From: " + senderAlias + " : (Y/N)")
 	fmt.Println("Response")
 	fmt.Scanln(&responseStr)
 	if err != nil {
@@ -64,25 +63,29 @@ func handleConnection(conn net.Conn, wg *sync.WaitGroup) {
 		log.Panic("Error writing to connection")
 		return
 	}
-	if responseStr == "N" {
+	switch responseStr {
+	case "y":
+		receiveFile(conn, newFilename)
+		conn.Close()
+		wg.Done()
+	default:
 		wg.Done()
 	}
-	receiveFile(conn, newFilename)
-	wg.Done()
+
 }
 func StartReceiveServer() {
-	server, err := net.Listen(network, port)
+	var conn net.Conn
+	var wg sync.WaitGroup
+	server, err := net.Listen(network, address+":"+port)
 	if err != nil {
 		log.Panic("Cannot start server", err)
 		return
 	}
 	defer server.Close()
-	fmt.Println("Receiver listening on 9080, CTRL+C to stop server")
-	var conn net.Conn
-	var wg sync.WaitGroup
+	fmt.Println("Receiver listening on port: " + port + ", CTRL+C to stop server")
 	for {
 		wg.Add(1)
-		fmt.Println("Waiting for connection...")
+		fmt.Println("Waiting for sender...")
 		conn, err = server.Accept()
 		if err != nil {
 			log.Panic("Error accepting connection", err)

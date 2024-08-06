@@ -6,85 +6,116 @@ import (
 	"log"
 	"net"
 	"os"
+	"strconv"
+	"sync"
 )
 
 const (
 	machinename = "testsender"
+	port        = "9080"
 	network     = "tcp"
 )
 
-func sendFile(conn net.Conn, filename string) {
-	defer func(conn net.Conn) {
-		err := conn.Close()
-		if err != nil {
-			recover()
-			log.Fatal(err)
-		}
-	}(conn)
-	fileBuffer := make([]byte, 1024)
-	file, err := os.Open(filename)
-	defer func(file *os.File) {
-		err := file.Close()
-		if err != nil {
-			recover()
-			log.Fatal(err)
-		}
-	}(file)
+type fileinfo struct {
+	filename     string
+	filesize     int64
+	fileContents *os.File
+}
+type sender struct {
+	conection   net.Conn
+	machinename string
+}
+
+func getFileInfo(file string) *fileinfo {
+	filestats, err := os.Stat(file)
 	if err != nil {
-		log.Fatal(err)
+		log.Fatal("cannot open file", err)
 	}
+	fileconts, err := os.Open(file)
+	if err != nil {
+		log.Fatal("Cannot open file: ", err)
+	}
+	return &fileinfo{
+		filename:     filestats.Name(),
+		filesize:     filestats.Size(),
+		fileContents: fileconts,
+	}
+}
+func newSenderConnection(ip string) *sender {
+	conn, err := net.Dial(network, ip+":"+port)
+	if err != nil {
+		log.Fatal("cannot open connection", err)
+	}
+	return &sender{
+		conection:   conn,
+		machinename: machinename,
+	}
+}
+func (s *sender) authenticateTransfer(file string) (bool, error) {
+	newFileInfo := getFileInfo(file)
+	filesize := strconv.FormatInt(newFileInfo.filesize, 10)
+	requestString := newFileInfo.filename + ":" + filesize + ":" + s.machinename
+	fmt.Println(newFileInfo.filesize)
+	requestBuffer := []byte(requestString)
+	_, err := s.conection.Write(requestBuffer)
+	if err != nil {
+		return false, err
+	}
+	response := func(conn net.Conn) string {
+		responseBuffer := make([]byte, 1024)
+		response, err := conn.Read(responseBuffer)
+		if err != nil {
+			log.Fatal("cannot read response", err)
+		}
+		s.conection = conn
+		return string(responseBuffer[:response])
+	}(s.conection)
+	fmt.Println(response)
+	switch response {
+	case "Y":
+		return true, nil
+	default:
+		return false, nil
+	}
+
+}
+func (s *sender) sendToRemote(file string, wg *sync.WaitGroup) {
+	fileInfo := getFileInfo(file)
+	filebuffer := make([]byte, 1024)
+	defer fileInfo.fileContents.Close()
+	defer wg.Done()
 	for {
-		chunks, err := file.Read(fileBuffer)
+		chunks, err := fileInfo.fileContents.Read(filebuffer)
 		if err == io.EOF {
 			break
 		}
 		if err != nil {
 			log.Fatal(err)
 		}
-		_, err = conn.Write(fileBuffer[:chunks])
+		_, err = s.conection.Write(filebuffer[:chunks])
 		if err != nil {
-			log.Fatal(err)
-			return
+			log.Fatal("Transfer error:", err)
 		}
 	}
-	fmt.Println("Sent successfully to remote")
 }
-func responseListener(conn net.Conn) (string, net.Conn) {
-	buffer := make([]byte, 1024)
-	n, err := conn.Read(buffer)
-	if err != nil {
-		log.Println(err.Error())
-	}
-	return string(buffer[:n]), conn
-}
-
-var requestMessage []byte
-
-func SendToRemoteMachine(receiveIP string, files ...string) {
-	receiverIP := receiveIP + ":9080"
-	for _, filename := range files {
-		conn, err := net.Dial(network, receiverIP)
+func SendFile(ip string, files ...string) {
+	var wg sync.WaitGroup
+	for _, file := range files {
+		newsender := newSenderConnection(ip)
+		respValue, err := newsender.authenticateTransfer(file)
 		if err != nil {
-			log.Println(err)
-		}
-		reqString := filename + ":" + machinename
-		requestMessage = []byte(reqString)
-		_, err = conn.Write(requestMessage)
-		if err != nil {
-			log.Fatal(err.Error())
-		}
-		responseText, establishedConn := responseListener(conn)
-		switch responseText {
-		case "Y":
-			sendFile(establishedConn, filename)
-			continue
-		case "N":
-			fmt.Println("Transfer request denied")
-			continue
-		default:
-			fmt.Println("Invalid response: Switching to default (Stop transfer)")
+			log.Println("Error in authentication", err)
 			continue
 		}
-		conn.Close()
+		switch respValue {
+		case true:
+			wg.Add(1)
+			go newsender.sendToRemote(file, &wg)
+			wg.Wait()
+			log.Println("File sent to remote: ", ip)
+		case false:
+			log.Println("Transfer request denied by receiver: ", ip)
+		}
+		newsender.conection.Close()
 	}
 }

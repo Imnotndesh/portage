@@ -14,7 +14,7 @@ func main() {
 	case "-S":
 		var receiverIP = os.Args[2]
 		files := os.Args[3:]
-		Sender.SendToRemoteMachine(receiverIP, files...)
+		Sender.SendFile(receiverIP, files...)
 	case "-R":
 		Receiver.StartReceiveServer()
 	default:
