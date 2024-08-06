@@ -17,5 +17,4 @@ A simple file sending utility written in golang
 - [x] Support for multiple files
 - [ ] Progress tracker
 - [ ] Notification when transfer complete on both sender and receiver
-- [ ] Speed meter
 - [ ] Concurrency for multiple file transfer connections
