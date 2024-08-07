@@ -1,6 +1,7 @@
 package Receiver
 
 import (
+	"bufio"
 	"fmt"
 	"io"
 	"log"
@@ -11,90 +12,137 @@ import (
 )
 
 const (
-	port    = "9080"
 	network = "tcp"
 	address = "127.0.0.1"
+	port    = "9080"
 )
 
-func ExtractDataFromMessage(message string) (string, string, string) {
-	tmpMsg := strings.Split(message, ":")
-	return tmpMsg[0], tmpMsg[1], tmpMsg[2]
+type fileInfo struct {
+	filename   string
+	filesize   string
+	senderName string
 }
-func receiveFile(conn net.Conn, filename string) {
-	defer conn.Close()
-	outfile, err := os.Create(filename)
+type receiver struct {
+	listener           net.Listener
+	listenAddr         string
+	transferConnection net.Conn
+}
+type Receiver interface {
+	startServer()
+	acceptConnection()
+	authTransfer() (bool, *fileInfo, error)
+	receiveFile(file fileInfo, wg *sync.WaitGroup)
+}
+
+// Server init
+func (r *receiver) startServer() {
+	Listener, err := net.Listen(network, address+":"+port)
 	if err != nil {
-		log.Panic("Error creating file", err)
+		log.Fatal("Cannot start server: ", err)
+	}
+	fmt.Println("Server listening on port: " + port + ", [CTRL+C to stop server]")
+	r.listener = Listener
+}
+
+// Connection handler
+func (r *receiver) acceptConnection() {
+	conn, err := r.listener.Accept()
+	if err != nil {
+		log.Fatal("Cannot accept connection: ", err)
+	}
+	r.transferConnection = conn
+}
+
+// File information extraction from sender message
+func extractFileInfo(msg string) *fileInfo {
+	tmp := strings.Split(msg, ":")
+	return &fileInfo{
+		filename:   tmp[0],
+		filesize:   tmp[1],
+		senderName: tmp[2],
+	}
+}
+
+// Auth handler
+func (r *receiver) authTransfer() (bool, *fileInfo, error) {
+	// Get file info from sender
+	senderMsgBuffer := make([]byte, 120)
+	senderMsg, err := r.transferConnection.Read(senderMsgBuffer)
+	if err != nil {
+		return false, nil, err
+	}
+	senderMsgString := string(senderMsgBuffer[:senderMsg])
+	incomingFileInfo := extractFileInfo(senderMsgString)
+
+	// Gather response
+	fmt.Println("Do you want to receive file: " + incomingFileInfo.filename + " ,size: " + incomingFileInfo.filesize + ", from: " + incomingFileInfo.senderName + " (Y/N): ")
+	scanner := bufio.NewScanner(os.Stdin)
+	fmt.Println("Response: ")
+	scanner.Scan()
+	receiverResponse := strings.ToUpper(scanner.Text())
+
+	// Return to response to sender
+	_, err = r.transferConnection.Write([]byte(receiverResponse))
+	if err != nil {
+		return false, nil, err
+	}
+
+	// Save response for later use
+	switch receiverResponse {
+	case "Y":
+		return true, incomingFileInfo, nil
+	default:
+		return false, nil, nil
+	}
+}
+
+// File receiving logic
+func (r *receiver) receiveFile(file fileInfo, wg *sync.WaitGroup) {
+	defer wg.Done()
+	defer r.transferConnection.Close()
+	outfile, err := os.Create(file.filename)
+	if err != nil {
+		log.Fatal("Cannot create file: ", err)
 	}
 	defer outfile.Close()
-	buffer := make([]byte, 1024)
+	incomingFileBuffer := make([]byte, 1024)
 	for {
-		fileChunks, err := conn.Read(buffer)
+		fileChunks, err := r.transferConnection.Read(incomingFileBuffer)
 		if err == io.EOF {
 			break
 		}
 		if err != nil {
-			log.Println("Cannot read from connection")
+			log.Fatal("Cannot read connection: ", err)
 		}
-		outfile.Write(buffer[:fileChunks])
+		_, err = outfile.Write(incomingFileBuffer[:fileChunks])
+		if err != nil {
+			log.Fatal("Cannot write file")
+		}
 	}
-	fmt.Println("Received file successfully")
 }
-func handleConnection(conn net.Conn, wg *sync.WaitGroup) {
-	var response []byte
-	var responseStr string
-	buffer := make([]byte, 1024)
-	senderMsg, err := conn.Read(buffer)
-	if err != nil {
-		log.Println("Error reading from connection")
-		return
-	}
-	requestMsg := string(buffer[:senderMsg])
-	newFilename, newFileSize, senderAlias := ExtractDataFromMessage(requestMsg)
-	fmt.Println("Do you want to receive file : " + newFilename + " , size: " + newFileSize + ", From: " + senderAlias + " : (Y/N)")
-	fmt.Println("Response")
-	fmt.Scanln(&responseStr)
-	if err != nil {
-		log.Panic("Cannot read response from user")
-	}
-	response = []byte(strings.ToUpper(responseStr))
-	_, err = conn.Write(response)
-	if err != nil {
-		log.Panic("Error writing to connection")
-		return
-	}
-	switch responseStr {
-	case "y":
-		receiveFile(conn, newFilename)
-		conn.Close()
-		wg.Done()
-	default:
-		wg.Done()
-	}
-
-}
-func StartReceiveServer() {
-	var conn net.Conn
+func StartReceiver() {
 	var wg sync.WaitGroup
-	server, err := net.Listen(network, address+":"+port)
-	if err != nil {
-		log.Panic("Cannot start server", err)
-		return
+	receiver := receiver{
+		listenAddr: address + ":" + port,
 	}
-	defer server.Close()
-	fmt.Println("Receiver listening on port: " + port + ", CTRL+C to stop server")
+	receiver.startServer()
 	for {
 		wg.Add(1)
-		fmt.Println("Waiting for sender...")
-		conn, err = server.Accept()
+		receiver.acceptConnection()
+		fmt.Println("Accepted connection from: " + receiver.listener.Addr().String())
+		receiveFile, incomingFile, err := receiver.authTransfer()
 		if err != nil {
-			log.Panic("Error accepting connection", err)
-			continue
+			log.Println("Error in authentication :(", err)
 		}
-		fmt.Println("----------File transfer----------")
-		go handleConnection(conn, &wg)
-		wg.Wait()
-		fmt.Println("--------------Done*--------------")
-		fmt.Println("")
+		switch receiveFile {
+		case true:
+			receiver.receiveFile(*incomingFile, &wg)
+			fmt.Println("File: " + incomingFile.filename + " received successfully :)")
+			wg.Wait()
+		case false:
+			fmt.Println("Transfer denied")
+			wg.Done()
+		}
+
 	}
 }

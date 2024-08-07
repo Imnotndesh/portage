@@ -16,7 +16,7 @@ func main() {
 		files := os.Args[3:]
 		Sender.SendFile(receiverIP, files...)
 	case "-R":
-		Receiver.StartReceiveServer()
+		Receiver.StartReceiver()
 	default:
 		fallthrough
 	case "-H":
