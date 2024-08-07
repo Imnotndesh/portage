@@ -16,8 +16,6 @@ jobs:
         run: go version
       - name: Build portage
         run: go build -o portage main.go
-  release:
-    steps:
       - name: Package for release
         uses: svenstaro/upload-release-action@v2
         with:
