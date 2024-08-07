@@ -13,6 +13,7 @@ jobs:
         uses: actions/setup-go@v2
         with:
           go-version : '1.22'
+        run: go version
       - name: Build portage
         run: go build -o portage main.go
   release:
